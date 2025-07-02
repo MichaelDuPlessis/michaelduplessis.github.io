@@ -12,7 +12,7 @@ jobs:
         uses: shalzz/zola-deploy-action@master
         env:
           # Target branch
-          PAGES_BRANCH: main
+          PAGES_BRANCH: blog
           # Provide personal access token
           # TOKEN: ${{ secrets.TOKEN }}
           # Or if publishing to the same repo, use the automatic token
