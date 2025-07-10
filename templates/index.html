@@ -1,14 +1,45 @@
 {% extends "base.html" %}
 
+{% block title %}Michael's Blog - Home{% endblock title %}
+
 {% block content %}
-<h1 class="title">
-  Michael's Blog
-</h1>
+<div class="hero">
+  <h1 class="title">Welcome to Michael's Blog</h1>
+  <p class="subtitle">Mostly where I write about cool things I code</p>
+</div>
 
-
-<ul>
+{% if section.pages %}
+<div class="blog-posts">
   {% for page in section.pages %}
-  <li><a href="{{ page.permalink | safe }}">{{ page.title }}</a></li>
+  <article class="post-item">
+    <h2 class="post-title">
+      <a href="{{ page.permalink | safe }}">{{ page.title }}</a>
+    </h2>
+
+    <div class="post-meta">
+      {% if page.date %}
+      <time datetime="{{ page.date }}">{{ page.date | date(format="%B %d, %Y") }}</time>
+      {% endif %}
+      {% if page.reading_time %}
+      • {{ page.reading_time }} min read
+      {% endif %}
+    </div>
+
+    {% if page.summary %}
+    <div class="post-summary">
+      {{ page.summary }}
+    </div>
+    {% elif page.description %}
+    <div class="post-summary">
+      {{ page.description }}
+    </div>
+    {% endif %}
+  </article>
   {% endfor %}
-</ul>
+</div>
+{% else %}
+<div class="no-posts">
+  <p>No blog posts yet. Check back soon!</p>
+</div>
+{% endif %}
 {% endblock content %}

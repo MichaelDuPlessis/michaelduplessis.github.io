@@ -3,15 +3,71 @@
 
 <head>
   <meta charset="utf-8">
-  <title>Michael's Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Michael's Blog{% endblock title %}</title>
+  <meta name="description"
+    content="{% block description %}Personal blog by Michael du Plessis{% endblock description %}">
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="{{ get_url(path='main.css') }}">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
 </head>
 
 <body>
-  <section class="section">
+  <!-- Header -->
+  <header class="header">
     <div class="container">
-      {% block content %} {% endblock content %}
+      <a href="{{ get_url(path='/') }}" class="logo">Michael's Blog</a>
+      <nav class="nav">
+        <a href="{{ get_url(path='/') }}">Home</a>
+        <a href="{{ get_url(path='/about') }}">About</a>
+      </nav>
     </div>
-  </section>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main">
+    <div class="content">
+      {% block content %}{% endblock content %}
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      {% block sidebar %}
+      <div class="widget">
+        <h3 class="widget-title">About</h3>
+        <div class="widget-content">
+          <p>Welcome to my personal blog where I write about cool things I have coded or just other general thoughts on
+            programming.</p>
+        </div>
+      </div>
+
+      <div class="widget">
+        <h3 class="widget-title">Recent Posts</h3>
+        <div class="widget-content">
+          <ul>
+            {% if section %}
+            {% for page in section.pages | slice(end=5) %}
+            <li><a href="{{ page.permalink }}">{{ page.title }}</a></li>
+            {% endfor %}
+            {% else %}
+            <li>No recent posts</li>
+            {% endif %}
+          </ul>
+        </div>
+      </div>
+      {% endblock sidebar %}
+    </aside>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <p>&copy; {{ now() | date(format="%Y") }} Michael du Plessis. All rights reserved.</p>
+    </div>
+  </footer>
 </body>
 
 </html>

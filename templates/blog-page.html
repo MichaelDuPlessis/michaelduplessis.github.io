@@ -1,11 +1,61 @@
 {% extends "base.html" %}
 
+{% block title %}{{ page.title }} - Michael's Blog{% endblock title %}
+{% block description %}{{ page.description | default(value=page.summary) | default(value="Blog post by Michael du Plessis") }}{% endblock description %}
+
 {% block content %}
-<h1 class="title">
-  {{ page.title }}
-</h1>
-
-<p class="subtitle"><strong>{{ page.date }}</strong></p>
-
-{{ page.content | safe }}
+<article class="blog-post">
+  <header class="post-header">
+    <h1 class="title">{{ page.title }}</h1>
+    
+    <div class="post-meta">
+      {% if page.date %}
+      <time datetime="{{ page.date }}">{{ page.date | date(format="%B %d, %Y") }}</time>
+      {% endif %}
+      {% if page.reading_time %}
+      • {{ page.reading_time }} min read
+      {% endif %}
+      {% if page.taxonomies.tags %}
+      • Tags: 
+      {% for tag in page.taxonomies.tags %}
+        <span class="tag">{{ tag }}</span>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+      {% endif %}
+    </div>
+  </header>
+  
+  <div class="post-content">
+    {{ page.content | safe }}
+  </div>
+  
+  <footer class="post-footer">
+    <div class="post-navigation">
+      {% if page.earlier %}
+      <a href="{{ page.earlier.permalink }}" class="nav-link prev">
+        ← {{ page.earlier.title }}
+      </a>
+      {% endif %}
+      
+      {% if page.later %}
+      <a href="{{ page.later.permalink }}" class="nav-link next">
+        {{ page.later.title }} →
+      </a>
+      {% endif %}
+    </div>
+  </footer>
+</article>
 {% endblock content %}
+
+{% block sidebar %}
+<div class="widget">
+  <h3 class="widget-title">Share this post</h3>
+  <div class="widget-content">
+    <div class="share-buttons">
+      <a href="https://twitter.com/intent/tweet?url={{ page.permalink | urlencode }}&text={{ page.title | urlencode }}" target="_blank" rel="noopener">Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url={{ page.permalink | urlencode }}" target="_blank" rel="noopener">LinkedIn</a>
+    </div>
+  </div>
+</div>
+
+{{ super() }}
+{% endblock sidebar %}
