@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Building CrabDB Part 1 - Michael's Blog</title>
+  <meta name="description"
+    content="">
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="https://blog.michael.du.plessis.co.za/main.css">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+</head>
+
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="container">
+      <a href="https://blog.michael.du.plessis.co.za" class="logo">Michael's Blog</a>
+      <nav class="nav">
+        <a href="https://blog.michael.du.plessis.co.za">Home</a>
+        <a href="https://blog.michael.du.plessis.co.za/about">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main">
+    <div class="content">
+      
+<article class="blog-post">
+  <header class="post-header">
+    <h1 class="title">Building CrabDB Part 1</h1>
+    
+    <div class="post-meta">
+      
+      <time datetime="2025-08-07">August 07, 2025</time>
+      
+      
+      • 14 min read
+      
+      
+    </div>
+  </header>
+  
+  <div class="post-content">
+    <p>This is the first post on my journey in building a NoSQL key value database known as CrabDB. An impoprtant anecdote is that CrabDB is in early stages of
+development so whatever is stated in this blog post can and most likely will change. This post should be treated more as a point in time snapshot of CrabDB
+in its current state.</p>
+<p>Also the code show in this blog post will be mostly devoid of any real error handeling and such things all code is just use for illustrative purposes if you
+want to see the actual code go to the CrabDB repo.</p>
+<h1 id="about-crabdb">About CrabDB</h1>
+<p>A couple of months ago I decided that I wanted build a database from scratch so that I could better understand how the internals of these programs
+I use every day work. I made the following decisions on my database:</p>
+<ul>
+<li>It will be a NoSQL database as at the time I just wasn't in the mood to make a SQL compiler.</li>
+<li>I will use no external dependencies since I one do really like programming and two I think I will learn a lot more if I code everything by hand. So in general
+if it is not offered by the languages standard library I won't use it.</li>
+<li>The database engine will be programmed in <a href="https://www.rust-lang.org/">Rust</a> so that is can be <strong>blazingly fast 🔥</strong> and since it currently is my favourite programming
+language.</li>
+</ul>
+<p>Now after I decided all this I made the decision that I would be making a key/value database since I recently read a blog post on implementing a concurrent hashmap and
+thought it would be cool to build one myself. I then named the database CrabDB since "crab" sounds like "grab" and crab is nice and rusty.</p>
+<p>Without further adieu lets get into the meet of the blog.</p>
+<h1 id="crabdb-internals">CrabDB Internals</h1>
+<p>CrabDB is split into the following main sections:</p>
+<ul>
+<li>object: Concerns itself with how objects are stored and represented as well as what data types can be stored in the database.</li>
+<li>server: This system is responsible for listening for connections as well as receiving data and sending data back.</li>
+<li>storage: All logic pertaining to how data is stored in the database is handeled here.</li>
+<li>engine: Everything comes together here and this can be thought of the manager of all the other systems, it contains the <code>main.rs</code> file.</li>
+<li>There are other miscellaneous crates litered around but they are not integral to the functionality but will still be described in this post.</li>
+</ul>
+<h2 id="object">Object</h2>
+<p>An object is an item stored in CrabDB for now the following types that I want CrabDB to support are as follows:</p>
+<ul>
+<li>String (known as Text in CrabDB)</li>
+<li>Int</li>
+<li>List</li>
+<li>Map (aka json object, aka dictionary, aka record, aka struct)</li>
+</ul>
+<p>This is where the most amount of changes and rewrites occured in these initial stages of the database and at the current rate it will be rewritten again at some point.
+Since I had to suffer with my own insanity and indecisiveness I will explain to all the readers every implementation, I will even number them for clarity.</p>
+<h3 id="attempt-1-enums">Attempt 1 - Enums</h3>
+<p>The most natural way to model what I wanted to achieve in Rust with an enum with a varient per data type as follows:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">struct </span><span>Text { </span><span style="color:#65737e;">/* ... */</span><span>}
+</span><span style="color:#b48ead;">struct </span><span>Int { </span><span style="color:#65737e;">/* ... */</span><span>}
+</span><span style="color:#b48ead;">struct </span><span>List { </span><span style="color:#65737e;">/* ... */</span><span>}
+</span><span style="color:#b48ead;">struct </span><span>Map { </span><span style="color:#65737e;">/* ... */</span><span>}
+</span><span>
+</span><span style="color:#b48ead;">enum </span><span>Object {
+</span><span>  Text(Text),
+</span><span>  Int(Int),
+</span><span>  List(List),
+</span><span>  Map(Map),
+</span><span>}
+</span></code></pre>
+<p>This is exactly what I did and it worked very well. All data is recieved as bytse over Tcp so a payload could very easily be structured with a single byte for the type
+followed by the bytes to build the object so the code to serialize an deserialize the objects is as follows:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">impl </span><span>Object {
+</span><span>  </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">serialize</span><span>(&amp;</span><span style="color:#bf616a;">self</span><span>) -&gt; Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt; {
+</span><span>    </span><span style="color:#65737e;">// This sucks though that I am just constantly repeating code
+</span><span>    </span><span style="color:#b48ead;">match </span><span style="color:#bf616a;">self </span><span>{
+</span><span>      </span><span style="color:#b48ead;">Self</span><span>::Text(obj) =&gt; obj.</span><span style="color:#96b5b4;">serialize</span><span>(),
+</span><span>      </span><span style="color:#b48ead;">Self</span><span>::Int(obj) =&gt; obj.</span><span style="color:#96b5b4;">serialize</span><span>(),
+</span><span>      </span><span style="color:#b48ead;">Self</span><span>::List(obj) =&gt; obj.</span><span style="color:#96b5b4;">serialize</span><span>(),
+</span><span>      </span><span style="color:#b48ead;">Self</span><span>::Map(obj) =&gt; obj.</span><span style="color:#96b5b4;">serialize</span><span>(),
+</span><span>    }
+</span><span>  }
+</span><span>
+</span><span>  </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">deserialize</span><span>(</span><span style="color:#bf616a;">bytes</span><span>: &amp;[</span><span style="color:#b48ead;">u8</span><span>]) -&gt; </span><span style="color:#b48ead;">Self </span><span>{
+</span><span>    </span><span style="color:#b48ead;">let</span><span> type_id = bytes[</span><span style="color:#d08770;">0</span><span>];
+</span><span>
+</span><span>    </span><span style="color:#b48ead;">match</span><span> type_id {
+</span><span>      </span><span style="color:#d08770;">0 </span><span>=&gt; </span><span style="color:#b48ead;">Self</span><span>::Text(Text::from_bytes(&amp;bytes[</span><span style="color:#d08770;">1</span><span>..]))
+</span><span>      </span><span style="color:#d08770;">1 </span><span>=&gt; </span><span style="color:#b48ead;">Self</span><span>::Int(Int::from_bytes(&amp;bytes[</span><span style="color:#d08770;">1</span><span>..]))
+</span><span>      </span><span style="color:#d08770;">2 </span><span>=&gt; </span><span style="color:#b48ead;">Self</span><span>::List(List::from_bytes(&amp;bytes[</span><span style="color:#d08770;">1</span><span>..]))
+</span><span>      </span><span style="color:#d08770;">3 </span><span>=&gt; </span><span style="color:#b48ead;">Self</span><span>::Map(Map::from_bytes(&amp;bytes[</span><span style="color:#d08770;">1</span><span>..]))
+</span><span>      _ =&gt; </span><span style="color:#65737e;">// error no type
+</span><span>    }
+</span><span>  }
+</span><span>}
+</span></code></pre>
+<p>This is great and its easy plus its super simple for future Michael to go and debug. An each varient has its own struct that handles the underlying logic. It is also
+important to note at this time data would be deserialized and stored in the deserialized format (this will be important later).</p>
+<h3 id="attemp-2-boxes-traits-and-dynamic-dispatch">Attemp 2 - Boxes, Traits and Dynamic Dispatch</h3>
+<p>I am a programmer so I love to struggle and suffer and why do things the easy way when we can just suffer instead. Essentially what happend was I had the idea: what if
+the user wants to create a custom type with some format. Now I could just add another varient to the enum to handle this but instead what if we made an Object trait.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">trait </span><span>Object {
+</span><span>  </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">serialize</span><span>(&amp;</span><span style="color:#bf616a;">self</span><span>) -&gt; Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt;;
+</span><span>}
+</span></code></pre>
+<p>Have <code>Text</code>, <code>Int</code>, <code>List</code> and <code>Map</code> implement that then we make use of dynamic dispatch with <code>Box&lt;dyn Object&gt;</code> and then create an <code>ObjectFactory</code> in which you can register
+types with function to build them from a byte slice which then returns a <code>Box&lt;dyn Object&gt;</code>.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">type </span><span>TypeId = </span><span style="color:#b48ead;">u8</span><span>;
+</span><span>
+</span><span style="color:#65737e;">// This won&#39;t compile its missing higher ranked trait bounds and the object should really also have at least Send implemented
+</span><span style="color:#b48ead;">struct </span><span>ObjectFactory {
+</span><span>  </span><span style="color:#bf616a;">factories</span><span>: HashMap&lt;TypeId, Box&lt;dyn Fn(&amp;[</span><span style="color:#b48ead;">u8</span><span>]) -&gt; Box&lt;dyn Object&gt;&gt;&gt; 
+</span><span>}
+</span><span>
+</span><span style="color:#b48ead;">impl </span><span>ObjectFactory {
+</span><span>  </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">add_factory</span><span>(&amp;</span><span style="color:#b48ead;">mut </span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">type_id</span><span>: TypeId, </span><span style="color:#bf616a;">factory</span><span>: Box&lt;dyn Fn(&amp;[</span><span style="color:#b48ead;">u8</span><span>]) -&gt; Box&lt;dyn Object&gt;&gt;) -&gt; Box&lt;dyn Fn(&amp;[</span><span style="color:#b48ead;">u8</span><span>]) -&gt; Box&lt;dyn Object&gt;&gt; {
+</span><span>    </span><span style="color:#65737e;">// code
+</span><span>  }
+</span><span>
+</span><span>  </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">create</span><span>(&amp;</span><span style="color:#b48ead;">mut </span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">type_id</span><span>: TypeId, </span><span style="color:#bf616a;">bytes</span><span>: &amp;[</span><span style="color:#b48ead;">u8</span><span>]) -&gt; Box&lt;dyn Fn(&amp;[</span><span style="color:#b48ead;">u8</span><span>]) -&gt; Box&lt;dyn Object&gt;&gt; {
+</span><span>    </span><span style="color:#65737e;">// code
+</span><span>  }
+</span><span>}
+</span></code></pre>
+<p>Now the ObjectFactory was very cool and I had it has a "singleton" but it was difficult to work worth and the whole time I was doubting whether it was even worth besides
+difficulty in implementing there were other easier wasys to achieve this that would also probably be faster since as a general rule of thumb static dispatch with enums
+is almost always better.</p>
+<p><strong>sigh</strong></p>
+<h3 id="attemp-3-enums-again">Attemp 3 - Enums... again</h3>
+<p>In the end everything was complicated the code while not spaghetti would give me headache while looking at it so I rewrote it back to the original enum implementation
+but I also though while I was at it I will delete all the other code I had effectively starting from scratch. And you know what while all what I did was go back to the
+original implementation somehow coding it from scratch resulted in less code and more importantly cleaner code. A good rule is you will always code something better the second,
+third, ...,  nth time better.</p>
+<h3 id="internal-repersentation">Internal Repersentation</h3>
+<p>Originally all data when recieved was desiarlized into the actual type it was. What this essentially means is that data would be recieved in raw bytes and I would convert it
+to what it was defined as for example a list would be deserialized to a type like this:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">struct </span><span>List {
+</span><span>  </span><span style="color:#bf616a;">items</span><span>: Vec&lt;Object&gt; </span><span style="color:#65737e;">// remember the object definition from above
+</span><span>}
+</span></code></pre>
+<p>This has some benefits for example if you want to perform operations on data types they are alread in the correct format. Naturally though this does have downsides. Firstly
+the above representation is less memory effcient and also deserializing costs time so the whole database operation is slower and you end up paying this cost twice once when
+you deserialize and again when you need to serialize to send it back over Tcp. These costs are even worse when you consider that types like Map and Lists can contain maps
+and lists themselves so they are recursive types.</p>
+<p>Due to the above considerations there was one more major change to the Object crate and that was to instead store that data as a flat byte array with a tag specifying what
+data type is being stored. If any operations are now to be performed the data has to be first deserialzed and then re-serialized which obviously also has a cost but considering
+the most common operation on a database is reads having data be sent to clients faster due to no serializing needing to take place is worth it. The current implementation looks
+something like this:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">enum </span><span>ObjectKind {
+</span><span>  Text,
+</span><span>  Int,
+</span><span>  List,
+</span><span>  Map,
+</span><span>}
+</span><span>
+</span><span style="color:#b48ead;">struct </span><span>Object {
+</span><span>  </span><span style="color:#bf616a;">object_kind</span><span>: ObjectKind,
+</span><span>  </span><span style="color:#bf616a;">data</span><span>: Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt;,
+</span><span>}
+</span></code></pre>
+<h2 id="server">Server</h2>
+<p>This part of the database is responsible for listening for client connections, recieving and sending data. The networking is not all that interesting as all what it
+requires is designing a protocol to send and receive data and deciding what that protocol is build off of. CrabDB uses Tcp as the underlying protocol since it has low
+overhead (relative to http) and is pretty fast. As all good network protocols work they start with stating the how much data is being sent, this is then followed up
+by the command that is being executed (GET, SET, etc), this is then followed up by the type id (Text, Int, etc) and finally the actual data for the type if there is
+any. A full overview of the protocol can be found on the GitHub for CrabDB.</p>
+<p>In general as you can see the networking part is relatively boring and as of yet I haven't made any cool optimisations but the following commands are supported:</p>
+<ul>
+<li>GET: gets an object</li>
+<li>SET: sets an object</li>
+<li>DELETE: deletes and objet</li>
+<li>CLOSE: closes the connection</li>
+</ul>
+<h2 id="storage">Storage</h2>
+<p>This is again where things become more interesting. CrabDB is designed to be a hyper performent database so that means most if not all the data should be kept in memory.
+To this end the initial implementation of CrabDB only supported in memory storage with zero persistence. First a trait was defined:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">trait </span><span>Storage {
+</span><span>  </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">set</span><span>(&amp;</span><span style="color:#b48ead;">mut </span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">key</span><span>: &amp;</span><span style="color:#b48ead;">str</span><span>) -&gt; Option&lt;Object&gt;; </span><span style="color:#65737e;">// returns the previous object under that key if there is one
+</span><span>
+</span><span>  </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">get</span><span>(&amp;</span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">key</span><span>: &amp;</span><span style="color:#b48ead;">str</span><span>, </span><span style="color:#bf616a;">object</span><span>: Object) -&gt; Option&lt;Object&gt;;
+</span><span>
+</span><span>  </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">delete</span><span>(&amp;</span><span style="color:#b48ead;">mut </span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">key</span><span>: &amp;</span><span style="color:#b48ead;">str</span><span>) -&gt; Option&lt;Object&gt;; </span><span style="color:#65737e;">// returns the deleted object
+</span><span>}
+</span></code></pre>
+<p>Remember this is not exactly how the trait looks in the actual implementation it is much more sophisticated there using a <code>Key</code> type as well as returning a <code>Result</code> for
+better error handeling, the code shown in this blog post removes all the boring fluff.</p>
+<h3 id="an-in-memory-only-storage-solution">An in Memory Only Storage Solution</h3>
+<p>The most simply way to create a type that implements this trait is with a simple Rust <code>HashMap</code>.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">struct </span><span>InMemoryStorage {
+</span><span>  </span><span style="color:#bf616a;">map</span><span>: HashMap&lt;&amp;</span><span style="color:#b48ead;">str</span><span>, Object&gt;,
+</span><span>}
+</span><span>
+</span><span style="color:#b48ead;">impl </span><span>Storage </span><span style="color:#b48ead;">for </span><span>HashMap {
+</span><span>  </span><span style="color:#65737e;">// ... you can probably figure out what goes here
+</span><span>}
+</span></code></pre>
+<p>And while this works and is fast its a little bit sad because its single threaded and multithreaded code is always better right? right? So now you want your code to
+be multithreaded so you slap on a mutex or even better a reader writers lock and call it a day. Unfortunetly at your grand database unveiling people notive that
+if they have a task with many mixed reads and writes your database starts taking a bit too long to well do anything. We in the business call that <strong>contention</strong>.
+If the problem is not immediately obvious what is happening is that your database performs fine when you write infrequently and almost always perform reads but when you
+write a lot you need to take a writers lock which blocks all other access to the data. Now you end up going to down a rabbit hole trying to figure out how to
+implement a truly concurrent hash map since if you recall we are not allowed to use third party packages and everything must be home grown. <strong>sigh</strong>. In your travels
+of the wider internet you keep coming across people mentioning (which I must assume at this point) Java's legendary concurrent hash map. As an aside this irks me, since
+I think Java is one of the worst programming languages ever made.</p>
+<p>Here is a rundown of a simple implementation of a concurrent hashmap, if you would like a more fully cable concurrent hashmap I would recommend checking out <a href="https://github.com/xacrimon/dashmap">dashmap</a>,
+<a href="https://github.com/Cassy343/flashmap">flashmap</a> or even if you must <a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ConcurrentHashMap.html">Java's concurrent hashmap</a>.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">struct </span><span>ConcurrentHashMap&lt;K, V&gt; {
+</span><span>  </span><span style="color:#65737e;">// The trick is to have a list of hashmaps
+</span><span>  </span><span style="color:#bf616a;">shards</span><span>: Vec&lt;RwLock&lt;HashMap&lt;K, V&gt;&gt;&gt;,
+</span><span>}
+</span><span>
+</span><span style="color:#b48ead;">impl</span><span>&lt;K, V&gt; ConcurrentHashMap&lt;K, V&gt; {
+</span><span>    </span><span style="color:#65737e;">// Creates a new concurrent hashmap with the specified number of shards
+</span><span>    </span><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">new</span><span>(</span><span style="color:#bf616a;">num_shards</span><span>: </span><span style="color:#b48ead;">usize</span><span>) -&gt; </span><span style="color:#b48ead;">Self </span><span>{
+</span><span>        </span><span style="color:#b48ead;">let mut</span><span> shards = Vec::with_capacity(num_shards);
+</span><span>
+</span><span>        </span><span style="color:#b48ead;">for </span><span>_ in </span><span style="color:#d08770;">0</span><span>..num_shards {
+</span><span>            shards.</span><span style="color:#96b5b4;">push</span><span>(RwLock::new(HashMap::default()));
+</span><span>        }
+</span><span>
+</span><span>        </span><span style="color:#b48ead;">Self </span><span>{ shards }
+</span><span>    }
+</span><span>}
+</span><span>
+</span><span style="color:#b48ead;">impl</span><span>&lt;K, V&gt; ConcurrentHashMap&lt;K, V&gt;
+</span><span style="color:#b48ead;">where
+</span><span>    K: Hash + Eq, </span><span style="color:#65737e;">// required for hashmap
+</span><span>{
+</span><span>    </span><span style="color:#65737e;">// Gets the shard index that a key belongs to
+</span><span>    </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">shard_index</span><span>(&amp;</span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">key</span><span>: &amp;K) -&gt; </span><span style="color:#b48ead;">usize </span><span>{
+</span><span>        </span><span style="color:#b48ead;">let mut</span><span> hasher = DefaultHasher::new();
+</span><span>        key.</span><span style="color:#96b5b4;">hash</span><span>(&amp;</span><span style="color:#b48ead;">mut</span><span> hasher);
+</span><span>        hasher.</span><span style="color:#96b5b4;">finish</span><span>() as </span><span style="color:#b48ead;">usize </span><span>% </span><span style="color:#bf616a;">self</span><span>.</span><span style="color:#96b5b4;">num_shards</span><span>()
+</span><span>    }
+</span><span>
+</span><span>    </span><span style="color:#65737e;">// Gets the shard that a key belongs too
+</span><span>    </span><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">shard</span><span>(&amp;</span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">key</span><span>: &amp;K) -&gt; &amp;RwLock&lt;HashMap&lt;K, V&gt;&gt; {
+</span><span>        </span><span style="color:#65737e;">// getting the index that the key belongs in
+</span><span>        </span><span style="color:#b48ead;">let</span><span> shard_index = </span><span style="color:#bf616a;">self</span><span>.</span><span style="color:#96b5b4;">shard_index</span><span>(&amp;key);
+</span><span>        </span><span style="color:#65737e;">// getting shard
+</span><span>        </span><span style="color:#b48ead;">let</span><span> shard = </span><span style="color:#bf616a;">self</span><span>.shards[shard_index] };
+</span><span>
+</span><span>        shard
+</span><span>    }
+</span><span>
+</span><span>I    </span><span style="color:#65737e;">// Inserts a new element into the ConcurrentMap
+</span><span>    </span><span style="color:#65737e;">// and returns the element was already there if one exists
+</span><span>    </span><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">insert</span><span>(&amp;</span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">key</span><span>: K, </span><span style="color:#bf616a;">value</span><span>: V) -&gt; Option&lt;V&gt; {
+</span><span>        </span><span style="color:#65737e;">// getting the shard
+</span><span>        </span><span style="color:#b48ead;">let</span><span> shard = </span><span style="color:#bf616a;">self</span><span>.</span><span style="color:#96b5b4;">shard</span><span>(&amp;key);
+</span><span>        </span><span style="color:#65737e;">// inserting the value
+</span><span>        </span><span style="color:#b48ead;">let mut</span><span> map = shard.</span><span style="color:#96b5b4;">write</span><span>().</span><span style="color:#96b5b4;">unwrap</span><span>();
+</span><span>        map.</span><span style="color:#96b5b4;">insert</span><span>(key, value)
+</span><span>    }
+</span><span>
+</span><span>    </span><span style="color:#65737e;">/// Reads an element from the map and returns None if no element is found
+</span><span>    </span><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">get</span><span>&lt;</span><span style="color:#b48ead;">&#39;a</span><span>&gt;(&amp;</span><span style="color:#b48ead;">&#39;a </span><span style="color:#bf616a;">self</span><span>, </span><span style="color:#bf616a;">key</span><span>: &amp;K) -&gt; Option&lt;Ref&lt;</span><span style="color:#b48ead;">&#39;a</span><span>, K, V&gt;&gt; </span><span style="color:#b48ead;">where</span><span> V: Clone{
+</span><span>        </span><span style="color:#65737e;">// getting the shard
+</span><span>        </span><span style="color:#b48ead;">let</span><span> shard = </span><span style="color:#bf616a;">self</span><span>.</span><span style="color:#96b5b4;">shard</span><span>(key);
+</span><span>
+</span><span>        </span><span style="color:#65737e;">// getting the element
+</span><span>        </span><span style="color:#b48ead;">let</span><span> map_guard = shard.</span><span style="color:#96b5b4;">read</span><span>().</span><span style="color:#96b5b4;">unwrap</span><span>();
+</span><span>        map_guard.</span><span style="color:#96b5b4;">get</span><span>(key).</span><span style="color:#96b5b4;">cloned</span><span>()
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>I left out the delete since it is not complicated ot implement as well as any other niceties. It its now obvious the trick to having a concurrent hashmap work
+is by having a list of non concurrent hashmaps each protected by a reader writer lock so that multiple hashmaps can be accessed concurrently. The actual
+implmentation is very simple; first hash the key has you would then just mod it by the number of shards you have to decide which shard this key belongs too. The ideal number
+of shards though is a heuristic that must be tested to determine the best number or an even cooler way to do it would be to have it dynamically grow and shrink.
+This also makes use of <a href="https://doc.rust-lang.org/book/ch15-05-interior-mutability.html">interior mutability</a> so only a <code>&amp;self</code> needs to be taken and the <code>Storage</code>
+trait is also updated to only use <code>&amp;self</code>'s so that it can safely be shared across threads and the underlying type must make sure of the safety gaurentees.</p>
+<p>Now they above implementation does have some issues that a more seasoned concurrent hashmap wouldn't have for example:</p>
+<ul>
+<li>The get clones data, surely returning a reference would be better and it is, the actual implementation of CrabDB's  concurrent hashmap does this.</li>
+<li>The default Rust hasher is used but there are faster ones out there.</li>
+<li>If one hashmap keeps getting hit we essentially have our previous problem so the hashing algorithm used should try to split operations evenly between shards.</li>
+</ul>
+<p>Overall this is a good enough first attempt at a concurrent hashmap to get CrabDB going, next we are going to go into persistence since losing all data on
+restart does kind of suck.</p>
+<h3 id="persistant-storage">Persistant Storage</h3>
+<p>Being able to concurrently read and write data to memory is very cool but unfortunately many users would ideally want their data persisted between database restarts or
+god forbid a crash. Typically there are two main mechanisms used for persisting data in an in memory database like memcached or redis.</p>
+<ul>
+<li>Append only file (AOF) which basically means any write operation (currently only set and delete) for us is written to a log file. On startup this log file can then be
+read and the in memory part of the database can be recreated by sequentially applying the operations.</li>
+<li>Taking periodic snapshots which is just what it sounds like where you on some interval take a snapshot of the database.</li>
+</ul>
+<p>These two solutions both have their pros and cons. AOF is very fast when writing since it is just appending to a log file but when you need to read the data back in it can
+take variable amount of time as well as pointpless operations can occur for example:</p>
+<pre style="background-color:#2b303b;color:#c0c5ce;"><code><span>  set key1 0
+</span><span>  del key1
+</span><span>  set key1 0
+</span></code></pre>
+<p>The same exact set is used twice and since a set occurs after the delete the delete is pointless. This can be negated by periodically compacting the log files but this then
+pasuses all writes to the database for that time. Taking snapshots is much faster to read but while a snapshot is being created no writes to the database can occur and on
+top of that any data after a snapshot is not saved until the next snapshot.</p>
+<p>Most databases implement both of these where they will first load from a snapshot and only read the log for all data after the backup was taken offering the best of both worlds.</p>
+<p>For the initial implementation AOF was implemented in which there are two options to implemnt which is what will be discussed below:</p>
+<h4 id="multiple-files-with-sharding">Multiple Files with Sharding</h4>
+<p>This is the current implementation that CrabDB uses it works in almost the same fashion as the concurrent hashmap where there are multiple files (shards) and
+each shard in the hashmap maps to a file in a 1:1 manner. Since data is only written to the in memory storage after successfully being written to the file this
+reduces contention. The biggest downside of this manenr of doing it is that the number of shards can not be changed since each file maps to a shard weird things
+can happen if you are not careful. This does have the benefit that all files can be reingested in parallel.</p>
+<h4 id="single-file-with-channel">Single File with Channel</h4>
+<p>This is most likely what CrabDB will switch to in the near future. Instead of having multiple files where a shard maps to a file each write operation sends the operation
+and data done through a channel and a seperately running thread receives the sent data and writes it to a file. This allows for then changing the number of shards since there
+is only a single source of truth. This does naturally have some downsides for example what is the upper limit of writing to a file (probably more then you think) and you can
+no longer read data in concurrently.</p>
+<h2 id="engine">Engine</h2>
+<p>This crate is fairly boring and just acts as the glue for all the other crates, it creates the server using the server crate and then passes data to the storage crate
+through the medium of the object crate. Yup thats it nothing special or really interesting.</p>
+<h2 id="other-crates">Other Crates</h2>
+<p>There are other crates involved but they are not considered as core as the crate already mentioned.</p>
+<h3 id="threadpool">Threadpool</h3>
+<p>This is just a threadpool that I implemented which pre-spawns a set number of threads and allows for queueing up jobs. Every time a client connects to the database a new
+job is submitted to the threadpool for it.</p>
+<h3 id="concurrent-map">Concurrent Map</h3>
+<p>This is just an implementation of a concurrent map as described above.</p>
+<h1 id="conclusion">Conclusion</h1>
+<p>This is just the first part of a series and much will still change. This mainly made as a learning project for now but who knows what will happen. Check out the code on <a href="https://github.com/MichaelDuPlessis/crabdb">github</a>.</p>
+
+  </div>
+  
+  <footer class="post-footer">
+    <div class="post-navigation">
+      
+      
+      
+    </div>
+  </footer>
+</article>
+
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      
+<div class="widget">
+  <h3 class="widget-title">Share this post</h3>
+  <div class="widget-content">
+    <div class="share-buttons">
+      <a href="https://twitter.com/intent/tweet?url=https%3A&#x2F;&#x2F;blog.michael.du.plessis.co.za&#x2F;crabdb-pt1&#x2F;&text=Building%20CrabDB%20Part%201" target="_blank" rel="noopener">Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A&#x2F;&#x2F;blog.michael.du.plessis.co.za&#x2F;crabdb-pt1&#x2F;" target="_blank" rel="noopener">LinkedIn</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="widget">
+        <h3 class="widget-title">About</h3>
+        <div class="widget-content">
+          <p>Welcome to my personal blog where I write about cool things I have coded or just other general thoughts on
+            programming.</p>
+        </div>
+      </div>
+
+      <div class="widget">
+        <h3 class="widget-title">Recent Posts</h3>
+        <div class="widget-content">
+          <ul>
+            
+            <li>No recent posts</li>
+            
+          </ul>
+        </div>
+      </div>
+      
+
+    </aside>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <p>&copy; 2025 Michael du Plessis. All rights reserved.</p>
+    </div>
+  </footer>
+</body>
+
+</html>
